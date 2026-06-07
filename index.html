@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAV混雑可視化マップ | MLIT-LINKS</title>
+  <meta name="description" content="MapLibre GL JS と地理院地図（標準・衛星）を用いた UAV（無人航空機）の飛行混雑可視化デモ。" />
+
+  <!-- MapLibre GL JS -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- タイトル / 説明パネル -->
+  <header id="panel-title" class="panel">
+    <h1>UAV混雑可視化マップ</h1>
+    <p class="subtitle">MLIT-LINKS 次世代航空モビリティ デモ</p>
+    <p class="note">※ 表示データはデモ用のダミーであり、実在の飛行を示すものではありません。</p>
+  </header>
+
+  <!-- コントロールパネル -->
+  <section id="panel-control" class="panel">
+    <div class="control-group">
+      <span class="control-label">背景地図</span>
+      <div class="seg" id="basemap-switch" role="group" aria-label="背景地図切替">
+        <button type="button" data-basemap="std" class="active">標準</button>
+        <button type="button" data-basemap="photo">衛星</button>
+        <button type="button" data-basemap="pale">淡色</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <span class="control-label">表示レイヤー</span>
+      <label class="toggle"><input type="checkbox" id="toggle-congestion" checked /> 混雑メッシュ</label>
+      <label class="toggle"><input type="checkbox" id="toggle-heatmap" /> ヒートマップ</label>
+      <label class="toggle"><input type="checkbox" id="toggle-points" checked /> UAV位置</label>
+    </div>
+
+    <div class="control-group">
+      <span class="control-label">メッシュ解像度</span>
+      <select id="mesh-size">
+        <option value="2">細かい（2km）</option>
+        <option value="5" selected>標準（5km）</option>
+        <option value="10">粗い（10km）</option>
+      </select>
+    </div>
+
+    <div class="control-group stats">
+      <span class="control-label">統計</span>
+      <div id="stats-content">読み込み中…</div>
+    </div>
+  </section>
+
+  <!-- 凡例 -->
+  <section id="panel-legend" class="panel">
+    <span class="control-label">混雑度（機体数 / メッシュ）</span>
+    <div id="legend-bar"></div>
+  </section>
+
+  <script src="js/config.js"></script>
+  <script src="js/map.js"></script>
+</body>
+</html>
