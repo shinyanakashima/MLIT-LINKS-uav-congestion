@@ -19,13 +19,11 @@ function buildStyle() {
       id: "basemap-" + key,
       type: "raster",
       source: "basemap-" + key,
-      // 初期は「標準」のみ表示
       layout: { visibility: key === "std" ? "visible" : "none" },
     });
   }
   return {
     version: 8,
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
     sources,
     layers,
   };
@@ -43,95 +41,145 @@ const map = new maplibregl.Map({
 
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "bottom-right");
 map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
-map.addControl(
-  new maplibregl.AttributionControl({ compact: true }),
-  "bottom-right"
-);
+map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
 // ---------------------------------------------------------------------------
-// 2. カラースケールのユーティリティ
+// 2. データモデル
+//   cells: [lon, lat, total, months[12], air[4], method[7], purpose[13], hokatsu]
 // ---------------------------------------------------------------------------
-function congestionColor(count) {
-  const scale = APP_CONFIG.congestionScale;
-  let color = scale[0][1];
-  for (const [threshold, c] of scale) {
-    if (count >= threshold) color = c;
-  }
-  return color;
+const COL = { LON: 0, LAT: 1, TOTAL: 2, MONTHS: 3, AIR: 4, METHOD: 5, PURPOSE: 6, HOKATSU: 7 };
+let META = null; // メタ情報（months, airspace, method, purpose）
+let CELLS = []; // 基準メッシュ（1km）セル配列
+
+// ラベル整形（フラグ名の接頭辞を除去）
+function cleanLabel(s) {
+  return s.replace(/^飛行空域_/, "").replace(/^飛行方法_/, "").replace(/^飛行目的（業務）_/, "").trim();
 }
 
-// MapLibre の step 式を生成（fill-color 用）
-function buildStepExpression() {
-  const scale = APP_CONFIG.congestionScale;
-  const expr = ["step", ["get", "count"], scale[0][1]];
-  for (let i = 1; i < scale.length; i++) {
-    expr.push(scale[i][0], scale[i][1]);
+// 現在選択中の指標から「セル → 件数」を取り出す関数を生成
+function buildMeasureFn() {
+  const group = document.getElementById("measure-group").value;
+  const idx = parseInt(document.getElementById("measure-value").value, 10);
+  switch (group) {
+    case "month":
+      return (c) => c[COL.MONTHS][idx] || 0;
+    case "airspace":
+      return (c) => c[COL.AIR][idx] || 0;
+    case "method":
+      return (c) => c[COL.METHOD][idx] || 0;
+    case "purpose":
+      // 用途配列の末尾に「包括申請」を追加している
+      return (c) =>
+        idx < c[COL.PURPOSE].length ? c[COL.PURPOSE][idx] || 0 : c[COL.HOKATSU] || 0;
+    default:
+      return (c) => c[COL.TOTAL];
   }
-  return expr;
 }
 
 // ---------------------------------------------------------------------------
-// 3. 混雑メッシュ（矩形メッシュ）の集計
-//    日本の地域メッシュ（JIS 標準地域メッシュ）に倣い矩形セルで集計する。
-//    点を直接セルへビニングするため、計算量は O(点数) で軽量。
+// 3. 表示メッシュへの再集計
+//   基準セル中心を選択解像度のメッシュへ束ね、指標値と総数を合算する。
 // ---------------------------------------------------------------------------
-let uavData = null; // 読み込んだ UAV 位置 FeatureCollection
-
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
-function computeCongestion(cellSizeKm) {
-  if (!uavData || uavData.features.length === 0) return EMPTY_FC;
+function computeMesh(cellSizeKm, measureFn) {
+  if (!CELLS.length) return { fc: EMPTY_FC, maxV: 0, sumV: 0, cellCount: 0 };
 
-  // セルサイズ（km）を緯度経度の刻み幅（度）へ換算
-  const center = APP_CONFIG.initialView.center;
+  const centerLat = APP_CONFIG.initialView.center[1];
   const latStep = cellSizeKm / 111.0;
-  const lonStep = cellSizeKm / (111.0 * Math.cos((center[1] * Math.PI) / 180));
+  const lonStep = cellSizeKm / (111.0 * Math.cos((centerLat * Math.PI) / 180));
 
-  // セルへビニング（キー = "列_行"）
-  const bins = new Map();
-  for (const pt of uavData.features) {
-    const [lon, lat] = pt.geometry.coordinates;
-    const i = Math.floor(lon / lonStep);
-    const j = Math.floor(lat / latStep);
+  const bins = new Map(); // key -> {v, t}
+  for (const c of CELLS) {
+    const v = measureFn(c);
+    if (v <= 0) continue; // 指標が0のセルは描画しない
+    const i = Math.floor(c[COL.LON] / lonStep);
+    const j = Math.floor(c[COL.LAT] / latStep);
     const key = i + "_" + j;
-    bins.set(key, (bins.get(key) || 0) + 1);
+    let bin = bins.get(key);
+    if (!bin) {
+      bin = { v: 0, t: 0 };
+      bins.set(key, bin);
+    }
+    bin.v += v;
+    bin.t += c[COL.TOTAL];
   }
 
-  // 非空セルのみを矩形ポリゴンとして出力
   const features = [];
-  for (const [key, count] of bins) {
+  let maxV = 0;
+  let sumV = 0;
+  for (const [key, bin] of bins) {
     const [i, j] = key.split("_").map(Number);
     const w = i * lonStep;
     const e = w + lonStep;
     const s = j * latStep;
     const n = s + latStep;
+    if (bin.v > maxV) maxV = bin.v;
+    sumV += bin.v;
     features.push({
       type: "Feature",
-      properties: { count },
+      properties: { v: bin.v, t: bin.t },
       geometry: {
         type: "Polygon",
         coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]],
       },
     });
   }
+  return { fc: { type: "FeatureCollection", features }, maxV, sumV, cellCount: features.length };
+}
+
+// 指標値をヒートマップ用の点群（基準セル中心）に変換
+function computePoints(measureFn) {
+  const features = [];
+  for (const c of CELLS) {
+    const v = measureFn(c);
+    if (v <= 0) continue;
+    features.push({
+      type: "Feature",
+      properties: { v },
+      geometry: { type: "Point", coordinates: [c[COL.LON], c[COL.LAT]] },
+    });
+  }
   return { type: "FeatureCollection", features };
 }
 
-function refreshCongestion() {
-  const cellSizeKm = parseFloat(document.getElementById("mesh-size").value);
-  const fc = computeCongestion(cellSizeKm);
-  const src = map.getSource("congestion");
-  if (src) src.setData(fc);
-  updateStats(fc);
+function buildStepExpression() {
+  const scale = APP_CONFIG.congestionScale;
+  const expr = ["step", ["get", "v"], "rgba(0,0,0,0)"]; // v<最初のしきい値 は透明
+  for (const [threshold, color] of scale) {
+    expr.push(threshold, color);
+  }
+  return expr;
 }
 
 // ---------------------------------------------------------------------------
-// 4. データ読み込みとレイヤー追加
+// 4. 再描画
+// ---------------------------------------------------------------------------
+function refresh() {
+  const cellSizeKm = parseFloat(document.getElementById("mesh-size").value);
+  const measureFn = buildMeasureFn();
+
+  const mesh = computeMesh(cellSizeKm, measureFn);
+  const meshSrc = map.getSource("congestion");
+  if (meshSrc) meshSrc.setData(mesh.fc);
+
+  const ptSrc = map.getSource("cellpoints");
+  if (ptSrc) ptSrc.setData(computePoints(measureFn));
+
+  updateStats(mesh);
+}
+
+// ---------------------------------------------------------------------------
+// 5. データ読み込みとレイヤー追加
 // ---------------------------------------------------------------------------
 async function loadData() {
   const res = await fetch(APP_CONFIG.dataUrl);
   if (!res.ok) throw new Error("データ取得に失敗しました: " + res.status);
-  uavData = await res.json();
+  const data = await res.json();
+  META = data.meta;
+  CELLS = data.cells;
+
+  populateMeasureValues();
 
   // --- 混雑メッシュ（塗りつぶし） ---
   map.addSource("congestion", { type: "geojson", data: EMPTY_FC });
@@ -141,23 +189,23 @@ async function loadData() {
     source: "congestion",
     paint: {
       "fill-color": buildStepExpression(),
-      "fill-opacity": 0.55,
-      "fill-outline-color": "rgba(255,255,255,0.35)",
+      "fill-opacity": 0.62,
+      "fill-outline-color": "rgba(255,255,255,0.25)",
     },
   });
 
-  // --- ヒートマップ ---
-  map.addSource("uav", { type: "geojson", data: uavData });
+  // --- ヒートマップ（基準セル中心、指標値で重み付け） ---
+  map.addSource("cellpoints", { type: "geojson", data: EMPTY_FC });
   map.addLayer({
     id: "uav-heatmap",
     type: "heatmap",
-    source: "uav",
+    source: "cellpoints",
     layout: { visibility: "none" },
     paint: {
-      "heatmap-weight": 0.6,
-      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 4, 0.8, 12, 2.5],
-      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 4, 6, 12, 30],
-      "heatmap-opacity": 0.8,
+      "heatmap-weight": ["interpolate", ["linear"], ["get", "v"], 0, 0, 50, 0.6, 500, 1],
+      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 4, 1, 12, 3],
+      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 4, 8, 12, 35],
+      "heatmap-opacity": 0.75,
       "heatmap-color": [
         "interpolate", ["linear"], ["heatmap-density"],
         0, "rgba(0,0,255,0)",
@@ -170,67 +218,79 @@ async function loadData() {
     },
   });
 
-  // --- UAV 位置（点） ---
-  map.addLayer({
-    id: "uav-points",
-    type: "circle",
-    source: "uav",
-    paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 1.8, 12, 5],
-      "circle-color": "#1d4ed8",
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 0.6,
-      "circle-opacity": 0.85,
-    },
-  });
-
-  bindPointPopups();
-  refreshCongestion();
+  bindPopups();
+  refresh();
 }
 
 // ---------------------------------------------------------------------------
-// 5. ポップアップ（UAV 位置クリック）
+// 6. ポップアップ（メッシュクリックで内訳表示）
 // ---------------------------------------------------------------------------
-function bindPointPopups() {
-  const popup = new maplibregl.Popup({ closeButton: true, maxWidth: "260px" });
-  map.on("click", "uav-points", (e) => {
+function bindPopups() {
+  const popup = new maplibregl.Popup({ closeButton: true, maxWidth: "280px" });
+  map.on("click", "congestion-fill", (e) => {
     const p = e.features[0].properties;
+    const groupLabel = document.getElementById("measure-group").selectedOptions[0].text;
+    const valSel = document.getElementById("measure-value");
+    const valLabel = valSel.disabled ? "" : "（" + valSel.selectedOptions[0].text + "）";
     popup
       .setLngLat(e.lngLat)
       .setHTML(
         `<div class="uav-popup">
-           <strong>${p.id}</strong><br/>
-           エリア: ${p.area}<br/>
-           用途: ${p.purpose} / ${p.airframe}<br/>
-           高度: ${p.altitude_m} m / 速度: ${p.speed_kmh} km/h<br/>
-           事業者: ${p.operator}
+           <strong>このメッシュの飛行計画</strong><br/>
+           ${groupLabel}${valLabel}: <b>${Number(p.v).toLocaleString()}</b> 件<br/>
+           総数（全期間）: ${Number(p.t).toLocaleString()} 件
          </div>`
       )
       .addTo(map);
   });
-  map.on("mouseenter", "uav-points", () => (map.getCanvas().style.cursor = "pointer"));
-  map.on("mouseleave", "uav-points", () => (map.getCanvas().style.cursor = ""));
+  map.on("mouseenter", "congestion-fill", () => (map.getCanvas().style.cursor = "pointer"));
+  map.on("mouseleave", "congestion-fill", () => (map.getCanvas().style.cursor = ""));
 }
 
 // ---------------------------------------------------------------------------
-// 6. 統計表示
+// 7. 統計表示
 // ---------------------------------------------------------------------------
-function updateStats(congestionFc) {
-  const total = uavData ? uavData.features.length : 0;
-  let maxCount = 0;
-  for (const f of congestionFc.features) {
-    if (f.properties.count > maxCount) maxCount = f.properties.count;
-  }
+function updateStats(mesh) {
+  if (!META) return;
   document.getElementById("stats-content").innerHTML =
-    `総機体数: <b>${total}</b> 機<br/>` +
-    `混雑メッシュ数: <b>${congestionFc.features.length}</b><br/>` +
-    `最大混雑: <b>${maxCount}</b> 機/メッシュ`;
+    `総飛行計画数: <b>${Number(META.total_plans).toLocaleString()}</b> 件<br/>` +
+    `表示メッシュ数: <b>${Number(mesh.cellCount).toLocaleString()}</b><br/>` +
+    `表示中合計: <b>${Number(mesh.sumV).toLocaleString()}</b> 件<br/>` +
+    `最大混雑: <b>${Number(mesh.maxV).toLocaleString()}</b> 件/メッシュ`;
 }
 
 // ---------------------------------------------------------------------------
-// 7. UI イベント
+// 8. 指標サブ選択肢の生成
+// ---------------------------------------------------------------------------
+function populateMeasureValues() {
+  const group = document.getElementById("measure-group").value;
+  const sel = document.getElementById("measure-value");
+  sel.innerHTML = "";
+  let items = null;
+  if (group === "month") items = META.months;
+  else if (group === "airspace") items = META.airspace.map(cleanLabel);
+  else if (group === "method") items = META.method.map(cleanLabel);
+  else if (group === "purpose") items = META.purpose.map(cleanLabel);
+
+  if (!items) {
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  items.forEach((label, i) => {
+    const o = document.createElement("option");
+    o.value = i;
+    o.textContent = label;
+    sel.appendChild(o);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 9. UI イベント
 // ---------------------------------------------------------------------------
 function setupUI() {
+  document.getElementById("source-text").textContent = APP_CONFIG.attributionText;
+
   // 背景地図切替
   document.querySelectorAll("#basemap-switch button").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -248,26 +308,27 @@ function setupUI() {
     });
   });
 
-  // レイヤー表示トグル
-  const toggles = [
-    ["toggle-congestion", "congestion-fill"],
-    ["toggle-heatmap", "uav-heatmap"],
-    ["toggle-points", "uav-points"],
-  ];
-  toggles.forEach(([inputId, layerId]) => {
-    document.getElementById(inputId).addEventListener("change", (e) => {
-      if (map.getLayer(layerId)) {
-        map.setLayoutProperty(layerId, "visibility", e.target.checked ? "visible" : "none");
-      }
-    });
+  // 指標グループ変更 → サブ選択肢を再生成して再描画
+  document.getElementById("measure-group").addEventListener("change", () => {
+    populateMeasureValues();
+    refresh();
   });
+  document.getElementById("measure-value").addEventListener("change", refresh);
+  document.getElementById("mesh-size").addEventListener("change", refresh);
 
-  // メッシュ解像度
-  document.getElementById("mesh-size").addEventListener("change", refreshCongestion);
+  // レイヤー表示トグル
+  document.getElementById("toggle-mesh").addEventListener("change", (e) => {
+    if (map.getLayer("congestion-fill"))
+      map.setLayoutProperty("congestion-fill", "visibility", e.target.checked ? "visible" : "none");
+  });
+  document.getElementById("toggle-heatmap").addEventListener("change", (e) => {
+    if (map.getLayer("uav-heatmap"))
+      map.setLayoutProperty("uav-heatmap", "visibility", e.target.checked ? "visible" : "none");
+  });
 }
 
 // ---------------------------------------------------------------------------
-// 8. 凡例の生成
+// 10. 凡例
 // ---------------------------------------------------------------------------
 function buildLegend() {
   const bar = document.getElementById("legend-bar");
@@ -276,24 +337,23 @@ function buildLegend() {
   for (let i = 0; i < scale.length; i++) {
     const from = scale[i][0];
     const to = i < scale.length - 1 ? scale[i + 1][0] : null;
-    const label = to === null ? `${from}+` : `${from}–${to - 1}`;
+    const label = to === null ? `${from.toLocaleString()}+` : `${from.toLocaleString()}–${(to - 1).toLocaleString()}`;
     const row = document.createElement("div");
     row.className = "legend-row";
     row.innerHTML =
-      `<span class="legend-swatch" style="background:${scale[i][1]}"></span><span>${label} 機</span>`;
+      `<span class="legend-swatch" style="background:${scale[i][1]}"></span><span>${label} 件</span>`;
     bar.appendChild(row);
   }
 }
 
 // ---------------------------------------------------------------------------
-// 9. 起動
+// 11. 起動
 // ---------------------------------------------------------------------------
 buildLegend();
 setupUI();
 map.on("load", () => {
   loadData().catch((err) => {
     console.error(err);
-    document.getElementById("stats-content").textContent =
-      "データの読み込みに失敗しました。";
+    document.getElementById("stats-content").textContent = "データの読み込みに失敗しました。";
   });
 });

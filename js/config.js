@@ -2,6 +2,9 @@
  * アプリ全体の設定値。
  * 背景地図はすべて国土地理院（地理院地図）のタイルを利用する。
  *   利用規約: https://maps.gsi.go.jp/development/ichiran.html
+ *
+ * 表示データは国土交通省 Project LINKS の無人航空機飛行計画データ（2025年度）を
+ * 1km 基準メッシュへ集計した結果（data/congestion-mesh.json）。
  */
 const APP_CONFIG = {
   // 初期表示（日本全体が収まる位置）
@@ -9,7 +12,7 @@ const APP_CONFIG = {
     center: [137.5, 37.0],
     zoom: 4.6,
     minZoom: 4,
-    maxZoom: 17,
+    maxZoom: 14,
   },
 
   // 地理院地図タイル定義
@@ -37,18 +40,23 @@ const APP_CONFIG = {
     },
   },
 
-  // UAV 位置データ
-  dataUrl: "data/uav-positions.geojson",
+  // 集計済み混雑メッシュデータ
+  dataUrl: "data/congestion-mesh.json",
 
-  // 混雑度カラースケール（機体数 → 色）
-  // [しきい値, 色] の昇順。凡例とメッシュ着色の双方で利用する。
+  // 混雑度カラースケール（対数的しきい値 → 色）。件数の偏りが大きいため対数刻み。
+  // [しきい値, 色] の昇順。先頭は「しきい値以上 次のしきい値未満」の最小区分。
   congestionScale: [
-    [0, "#2c7fb8"],
-    [3, "#41b6c4"],
-    [6, "#7fcdbb"],
-    [10, "#c7e9b4"],
-    [15, "#fed976"],
+    [1, "#ffffb2"],
+    [5, "#fed976"],
+    [10, "#feb24c"],
     [25, "#fd8d3c"],
-    [40, "#e31a1c"],
+    [50, "#fc4e2a"],
+    [100, "#e31a1c"],
+    [500, "#bd0026"],
+    [2000, "#800026"],
   ],
+
+  // 出典表記（必須）
+  attributionText:
+    "出典：国土交通省 Project LINKS「無人航空機飛行計画データ（2025年度）」を加工して作成",
 };

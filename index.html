@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>UAV混雑可視化マップ | MLIT-LINKS</title>
-  <meta name="description" content="MapLibre GL JS と地理院地図（標準・衛星）を用いた UAV（無人航空機）の飛行混雑可視化デモ。" />
+  <title>UAV飛行計画 混雑・空域マップ | MLIT-LINKS</title>
+  <meta name="description" content="MapLibre GL JS と地理院地図を用いた、無人航空機（UAV/ドローン）飛行計画の混雑・空域可視化マップ。国土交通省 Project LINKS のオープンデータを活用。" />
 
   <!-- MapLibre GL JS -->
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
@@ -17,9 +17,13 @@
 
   <!-- タイトル / 説明パネル -->
   <header id="panel-title" class="panel">
-    <h1>UAV混雑可視化マップ</h1>
-    <p class="subtitle">MLIT-LINKS 次世代航空モビリティ デモ</p>
-    <p class="note">※ 表示データはデモ用のダミーであり、実在の飛行を示すものではありません。</p>
+    <h1>UAV飛行計画 混雑・空域マップ</h1>
+    <p class="subtitle">MLIT-LINKS 次世代航空モビリティ</p>
+    <p class="note">
+      表示は<strong>飛行計画（申請）ベース</strong>であり、実際の飛行・実態を示すものではありません。
+      元データはスキャン資料からの抽出のため、完全性・正確性は保証されません。
+    </p>
+    <p class="source" id="source-text"></p>
   </header>
 
   <!-- コントロールパネル -->
@@ -28,16 +32,21 @@
       <span class="control-label">背景地図</span>
       <div class="seg" id="basemap-switch" role="group" aria-label="背景地図切替">
         <button type="button" data-basemap="std" class="active">標準</button>
-        <button type="button" data-basemap="photo">衛星</button>
         <button type="button" data-basemap="pale">淡色</button>
+        <button type="button" data-basemap="photo">衛星</button>
       </div>
     </div>
 
     <div class="control-group">
-      <span class="control-label">表示レイヤー</span>
-      <label class="toggle"><input type="checkbox" id="toggle-congestion" checked /> 混雑メッシュ</label>
-      <label class="toggle"><input type="checkbox" id="toggle-heatmap" /> ヒートマップ</label>
-      <label class="toggle"><input type="checkbox" id="toggle-points" checked /> UAV位置</label>
+      <span class="control-label">表示する指標</span>
+      <select id="measure-group">
+        <option value="total" selected>総数（全期間）</option>
+        <option value="month">月別</option>
+        <option value="airspace">飛行空域 区分別</option>
+        <option value="method">飛行方法別</option>
+        <option value="purpose">飛行目的（用途）別</option>
+      </select>
+      <select id="measure-value" disabled></select>
     </div>
 
     <div class="control-group">
@@ -49,6 +58,12 @@
       </select>
     </div>
 
+    <div class="control-group">
+      <span class="control-label">表示レイヤー</span>
+      <label class="toggle"><input type="checkbox" id="toggle-mesh" checked /> 混雑メッシュ</label>
+      <label class="toggle"><input type="checkbox" id="toggle-heatmap" /> ヒートマップ</label>
+    </div>
+
     <div class="control-group stats">
       <span class="control-label">統計</span>
       <div id="stats-content">読み込み中…</div>
@@ -57,7 +72,7 @@
 
   <!-- 凡例 -->
   <section id="panel-legend" class="panel">
-    <span class="control-label">混雑度（機体数 / メッシュ）</span>
+    <span class="control-label">混雑度（件数 / メッシュ）</span>
     <div id="legend-bar"></div>
   </section>
 
