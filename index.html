@@ -17,62 +17,67 @@
 
   <!-- タイトル / 説明パネル -->
   <header id="panel-title" class="panel">
-    <h1>UAV飛行計画 混雑・空域マップ</h1>
-    <p class="subtitle">MLIT-LINKS 次世代航空モビリティ</p>
-    <p class="note">
-      表示は<strong>飛行計画（申請）ベース</strong>であり、実際の飛行・実態を示すものではありません。
-      元データはスキャン資料からの抽出のため、完全性・正確性は保証されません。
-    </p>
-    <p class="source" id="source-text"></p>
+    <h1 data-i18n="app.title">UAV飛行計画 混雑・空域マップ</h1>
+    <p class="subtitle" data-i18n="app.subtitle">MLIT-LINKS 次世代航空モビリティ</p>
+    <p class="note" data-i18n-html="app.note"></p>
+    <p class="source" data-i18n="app.source"></p>
   </header>
 
   <!-- コントロールパネル -->
   <section id="panel-control" class="panel">
     <div class="control-group">
-      <span class="control-label">背景地図</span>
-      <div class="seg" id="basemap-switch" role="group" aria-label="背景地図切替">
-        <button type="button" data-basemap="std" class="active">標準</button>
-        <button type="button" data-basemap="pale">淡色</button>
-        <button type="button" data-basemap="photo">衛星</button>
+      <span class="control-label" data-i18n="label.lang">言語</span>
+      <div class="seg" id="lang-switch" role="group" aria-label="Language">
+        <button type="button" data-lang="ja" class="active">日本語</button>
+        <button type="button" data-lang="en">English</button>
       </div>
     </div>
 
     <div class="control-group">
-      <span class="control-label">表示する指標</span>
+      <span class="control-label" data-i18n="label.basemap">背景地図</span>
+      <div class="seg" id="basemap-switch" role="group" aria-label="Base map">
+        <button type="button" data-basemap="std" class="active" data-i18n="basemap.std">標準</button>
+        <button type="button" data-basemap="pale" data-i18n="basemap.pale">淡色</button>
+        <button type="button" data-basemap="photo" data-i18n="basemap.photo">衛星</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <span class="control-label" data-i18n="label.measure">表示する指標</span>
       <select id="measure-group">
-        <option value="total" selected>総数（全期間）</option>
-        <option value="month">月別</option>
-        <option value="airspace">飛行空域 区分別</option>
-        <option value="method">飛行方法別</option>
-        <option value="purpose">飛行目的（用途）別</option>
+        <option value="total" data-i18n="measure.total" selected>総数（全期間）</option>
+        <option value="month" data-i18n="measure.month">月別</option>
+        <option value="airspace" data-i18n="measure.airspace">飛行空域 区分別</option>
+        <option value="method" data-i18n="measure.method">飛行方法別</option>
+        <option value="purpose" data-i18n="measure.purpose">飛行目的（用途）別</option>
       </select>
       <select id="measure-value" disabled></select>
     </div>
 
     <div class="control-group">
-      <span class="control-label">メッシュ解像度</span>
+      <span class="control-label" data-i18n="label.mesh">メッシュ解像度</span>
       <select id="mesh-size">
-        <option value="2">細かい（2km）</option>
-        <option value="5" selected>標準（5km）</option>
-        <option value="10">粗い（10km）</option>
+        <option value="2" data-i18n="mesh.fine">細かい（2km）</option>
+        <option value="5" data-i18n="mesh.std" selected>標準（5km）</option>
+        <option value="10" data-i18n="mesh.coarse">粗い（10km）</option>
       </select>
     </div>
 
     <div class="control-group">
-      <span class="control-label">表示レイヤー</span>
-      <label class="toggle"><input type="checkbox" id="toggle-mesh" checked /> 混雑メッシュ</label>
-      <label class="toggle"><input type="checkbox" id="toggle-heatmap" /> ヒートマップ</label>
+      <span class="control-label" data-i18n="label.layers">表示レイヤー</span>
+      <label class="toggle"><input type="checkbox" id="toggle-mesh" checked /> <span data-i18n="toggle.mesh">混雑メッシュ</span></label>
+      <label class="toggle"><input type="checkbox" id="toggle-heatmap" /> <span data-i18n="toggle.heatmap">ヒートマップ</span></label>
     </div>
 
     <div class="control-group stats">
-      <span class="control-label">統計</span>
-      <div id="stats-content">読み込み中…</div>
+      <span class="control-label" data-i18n="label.stats">統計</span>
+      <div id="stats-content"></div>
     </div>
   </section>
 
   <!-- 凡例 -->
   <section id="panel-legend" class="panel">
-    <span class="control-label">混雑度（件数 / メッシュ）</span>
+    <span class="control-label" data-i18n="label.legend">混雑度（件数 / メッシュ）</span>
     <div id="legend-bar"></div>
   </section>
 

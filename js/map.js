@@ -1,5 +1,34 @@
-/* global maplibregl, APP_CONFIG */
+/* global maplibregl, APP_CONFIG, I18N, LABELS_EN */
 "use strict";
+
+// ---------------------------------------------------------------------------
+// 0. 多言語
+// ---------------------------------------------------------------------------
+let LANG = (function () {
+  try {
+    const saved = localStorage.getItem("uav-lang");
+    if (saved === "ja" || saved === "en") return saved;
+  } catch (e) { /* ignore */ }
+  return "ja";
+})();
+
+function t(key) {
+  return (I18N[LANG] && I18N[LANG][key]) || (I18N.ja && I18N.ja[key]) || key;
+}
+
+// 日本語の正規化済みラベルを現在言語へ
+function labelFor(jaLabel) {
+  if (LANG === "en") return LABELS_EN[jaLabel] || jaLabel;
+  return jaLabel;
+}
+
+// "202407" → 言語別の月表記
+const EN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function monthLabel(yyyymm) {
+  const y = yyyymm.slice(0, 4);
+  const m = parseInt(yyyymm.slice(4, 6), 10);
+  return LANG === "en" ? `${EN_MONTHS[m - 1]} ${y}` : `${y}年${m}月`;
+}
 
 // ---------------------------------------------------------------------------
 // 1. 地図スタイルの構築（地理院地図の各タイルをソース／レイヤーとして定義）
@@ -22,11 +51,7 @@ function buildStyle() {
       layout: { visibility: key === "std" ? "visible" : "none" },
     });
   }
-  return {
-    version: 8,
-    sources,
-    layers,
-  };
+  return { version: 8, sources, layers };
 }
 
 const map = new maplibregl.Map({
@@ -48,10 +73,9 @@ map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-rig
 //   cells: [lon, lat, total, months[12], air[4], method[7], purpose[13], hokatsu]
 // ---------------------------------------------------------------------------
 const COL = { LON: 0, LAT: 1, TOTAL: 2, MONTHS: 3, AIR: 4, METHOD: 5, PURPOSE: 6, HOKATSU: 7 };
-let META = null; // メタ情報（months, airspace, method, purpose）
-let CELLS = []; // 基準メッシュ（1km）セル配列
+let META = null;
+let CELLS = [];
 
-// ラベル整形（フラグ名の接頭辞を除去）
 function cleanLabel(s) {
   return s.replace(/^飛行空域_/, "").replace(/^飛行方法_/, "").replace(/^飛行目的（業務）_/, "").trim();
 }
@@ -68,7 +92,6 @@ function buildMeasureFn() {
     case "method":
       return (c) => c[COL.METHOD][idx] || 0;
     case "purpose":
-      // 用途配列の末尾に「包括申請」を追加している
       return (c) =>
         idx < c[COL.PURPOSE].length ? c[COL.PURPOSE][idx] || 0 : c[COL.HOKATSU] || 0;
     default:
@@ -78,7 +101,6 @@ function buildMeasureFn() {
 
 // ---------------------------------------------------------------------------
 // 3. 表示メッシュへの再集計
-//   基準セル中心を選択解像度のメッシュへ束ね、指標値と総数を合算する。
 // ---------------------------------------------------------------------------
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
@@ -89,10 +111,10 @@ function computeMesh(cellSizeKm, measureFn) {
   const latStep = cellSizeKm / 111.0;
   const lonStep = cellSizeKm / (111.0 * Math.cos((centerLat * Math.PI) / 180));
 
-  const bins = new Map(); // key -> {v, t}
+  const bins = new Map();
   for (const c of CELLS) {
     const v = measureFn(c);
-    if (v <= 0) continue; // 指標が0のセルは描画しない
+    if (v <= 0) continue;
     const i = Math.floor(c[COL.LON] / lonStep);
     const j = Math.floor(c[COL.LAT] / latStep);
     const key = i + "_" + j;
@@ -119,16 +141,12 @@ function computeMesh(cellSizeKm, measureFn) {
     features.push({
       type: "Feature",
       properties: { v: bin.v, t: bin.t },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]],
-      },
+      geometry: { type: "Polygon", coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
     });
   }
   return { fc: { type: "FeatureCollection", features }, maxV, sumV, cellCount: features.length };
 }
 
-// 指標値をヒートマップ用の点群（基準セル中心）に変換
 function computePoints(measureFn) {
   const features = [];
   for (const c of CELLS) {
@@ -145,10 +163,8 @@ function computePoints(measureFn) {
 
 function buildStepExpression() {
   const scale = APP_CONFIG.congestionScale;
-  const expr = ["step", ["get", "v"], "rgba(0,0,0,0)"]; // v<最初のしきい値 は透明
-  for (const [threshold, color] of scale) {
-    expr.push(threshold, color);
-  }
+  const expr = ["step", ["get", "v"], "rgba(0,0,0,0)"];
+  for (const [threshold, color] of scale) expr.push(threshold, color);
   return expr;
 }
 
@@ -174,14 +190,13 @@ function refresh() {
 // ---------------------------------------------------------------------------
 async function loadData() {
   const res = await fetch(APP_CONFIG.dataUrl);
-  if (!res.ok) throw new Error("データ取得に失敗しました: " + res.status);
+  if (!res.ok) throw new Error("data fetch failed: " + res.status);
   const data = await res.json();
   META = data.meta;
   CELLS = data.cells;
 
   populateMeasureValues();
 
-  // --- 混雑メッシュ（塗りつぶし） ---
   map.addSource("congestion", { type: "geojson", data: EMPTY_FC });
   map.addLayer({
     id: "congestion-fill",
@@ -194,7 +209,6 @@ async function loadData() {
     },
   });
 
-  // --- ヒートマップ（基準セル中心、指標値で重み付け） ---
   map.addSource("cellpoints", { type: "geojson", data: EMPTY_FC });
   map.addLayer({
     id: "uav-heatmap",
@@ -232,13 +246,14 @@ function bindPopups() {
     const groupLabel = document.getElementById("measure-group").selectedOptions[0].text;
     const valSel = document.getElementById("measure-value");
     const valLabel = valSel.disabled ? "" : "（" + valSel.selectedOptions[0].text + "）";
+    const unit = t("unit.plans");
     popup
       .setLngLat(e.lngLat)
       .setHTML(
         `<div class="uav-popup">
-           <strong>このメッシュの飛行計画</strong><br/>
-           ${groupLabel}${valLabel}: <b>${Number(p.v).toLocaleString()}</b> 件<br/>
-           総数（全期間）: ${Number(p.t).toLocaleString()} 件
+           <strong>${t("popup.title")}</strong><br/>
+           ${groupLabel}${valLabel}: <b>${Number(p.v).toLocaleString()}</b> ${unit}<br/>
+           ${t("popup.total")}: ${Number(p.t).toLocaleString()} ${unit}
          </div>`
       )
       .addTo(map);
@@ -251,26 +266,33 @@ function bindPopups() {
 // 7. 統計表示
 // ---------------------------------------------------------------------------
 function updateStats(mesh) {
-  if (!META) return;
+  if (!META) {
+    document.getElementById("stats-content").textContent = t("stats.loading");
+    return;
+  }
+  const plans = t("unit.plans");
   document.getElementById("stats-content").innerHTML =
-    `総飛行計画数: <b>${Number(META.total_plans).toLocaleString()}</b> 件<br/>` +
-    `表示メッシュ数: <b>${Number(mesh.cellCount).toLocaleString()}</b><br/>` +
-    `表示中合計: <b>${Number(mesh.sumV).toLocaleString()}</b> 件<br/>` +
-    `最大混雑: <b>${Number(mesh.maxV).toLocaleString()}</b> 件/メッシュ`;
+    `${t("stats.total")}: <b>${Number(META.total_plans).toLocaleString()}</b> ${plans}<br/>` +
+    `${t("stats.meshes")}: <b>${Number(mesh.cellCount).toLocaleString()}</b><br/>` +
+    `${t("stats.sum")}: <b>${Number(mesh.sumV).toLocaleString()}</b> ${plans}<br/>` +
+    `${t("stats.max")}: <b>${Number(mesh.maxV).toLocaleString()}</b> ${t("unit.permesh")}`;
 }
 
 // ---------------------------------------------------------------------------
-// 8. 指標サブ選択肢の生成
+// 8. 指標サブ選択肢の生成（現在言語で）
 // ---------------------------------------------------------------------------
 function populateMeasureValues() {
+  if (!META) return;
   const group = document.getElementById("measure-group").value;
   const sel = document.getElementById("measure-value");
+  const prev = sel.value;
   sel.innerHTML = "";
+
   let items = null;
-  if (group === "month") items = META.months;
-  else if (group === "airspace") items = META.airspace.map(cleanLabel);
-  else if (group === "method") items = META.method.map(cleanLabel);
-  else if (group === "purpose") items = META.purpose.map(cleanLabel);
+  if (group === "month") items = META.months.map(monthLabel);
+  else if (group === "airspace") items = META.airspace.map((s) => labelFor(cleanLabel(s)));
+  else if (group === "method") items = META.method.map((s) => labelFor(cleanLabel(s)));
+  else if (group === "purpose") items = META.purpose.map((s) => labelFor(cleanLabel(s)));
 
   if (!items) {
     sel.disabled = true;
@@ -283,13 +305,68 @@ function populateMeasureValues() {
     o.textContent = label;
     sel.appendChild(o);
   });
+  if (prev && prev < items.length) sel.value = prev;
 }
 
 // ---------------------------------------------------------------------------
-// 9. UI イベント
+// 9. 凡例
+// ---------------------------------------------------------------------------
+function buildLegend() {
+  const bar = document.getElementById("legend-bar");
+  const scale = APP_CONFIG.congestionScale;
+  const plans = t("unit.plans");
+  bar.innerHTML = "";
+  for (let i = 0; i < scale.length; i++) {
+    const from = scale[i][0];
+    const to = i < scale.length - 1 ? scale[i + 1][0] : null;
+    const label =
+      to === null
+        ? `${from.toLocaleString()}+`
+        : `${from.toLocaleString()}–${(to - 1).toLocaleString()}`;
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML =
+      `<span class="legend-swatch" style="background:${scale[i][1]}"></span><span>${label} ${plans}</span>`;
+    bar.appendChild(row);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 10. 言語適用
+// ---------------------------------------------------------------------------
+function applyLanguage(lang) {
+  LANG = lang;
+  try { localStorage.setItem("uav-lang", lang); } catch (e) { /* ignore */ }
+  document.documentElement.lang = lang;
+  document.title = t("doc.title");
+
+  // 静的テキスト
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.getAttribute("data-i18n"));
+  });
+  document.querySelectorAll("[data-i18n-html]").forEach((el) => {
+    el.innerHTML = t(el.getAttribute("data-i18n-html"));
+  });
+
+  // 言語ボタンの状態
+  document.querySelectorAll("#lang-switch button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.lang === lang);
+  });
+
+  // 動的部分
+  populateMeasureValues();
+  buildLegend();
+  refresh();
+}
+
+// ---------------------------------------------------------------------------
+// 11. UI イベント
 // ---------------------------------------------------------------------------
 function setupUI() {
-  document.getElementById("source-text").textContent = APP_CONFIG.attributionText;
+  // 言語切替
+  document.querySelectorAll("#lang-switch button").forEach((btn) => {
+    btn.addEventListener("click", () => applyLanguage(btn.dataset.lang));
+  });
 
   // 背景地図切替
   document.querySelectorAll("#basemap-switch button").forEach((btn) => {
@@ -308,7 +385,7 @@ function setupUI() {
     });
   });
 
-  // 指標グループ変更 → サブ選択肢を再生成して再描画
+  // 指標
   document.getElementById("measure-group").addEventListener("change", () => {
     populateMeasureValues();
     refresh();
@@ -316,7 +393,7 @@ function setupUI() {
   document.getElementById("measure-value").addEventListener("change", refresh);
   document.getElementById("mesh-size").addEventListener("change", refresh);
 
-  // レイヤー表示トグル
+  // レイヤー表示
   document.getElementById("toggle-mesh").addEventListener("change", (e) => {
     if (map.getLayer("congestion-fill"))
       map.setLayoutProperty("congestion-fill", "visibility", e.target.checked ? "visible" : "none");
@@ -328,32 +405,15 @@ function setupUI() {
 }
 
 // ---------------------------------------------------------------------------
-// 10. 凡例
+// 12. 起動
 // ---------------------------------------------------------------------------
-function buildLegend() {
-  const bar = document.getElementById("legend-bar");
-  const scale = APP_CONFIG.congestionScale;
-  bar.innerHTML = "";
-  for (let i = 0; i < scale.length; i++) {
-    const from = scale[i][0];
-    const to = i < scale.length - 1 ? scale[i + 1][0] : null;
-    const label = to === null ? `${from.toLocaleString()}+` : `${from.toLocaleString()}–${(to - 1).toLocaleString()}`;
-    const row = document.createElement("div");
-    row.className = "legend-row";
-    row.innerHTML =
-      `<span class="legend-swatch" style="background:${scale[i][1]}"></span><span>${label} 件</span>`;
-    bar.appendChild(row);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 11. 起動
-// ---------------------------------------------------------------------------
-buildLegend();
 setupUI();
+applyLanguage(LANG); // 静的テキスト・凡例を初期化（データ未取得でも安全）
 map.on("load", () => {
-  loadData().catch((err) => {
-    console.error(err);
-    document.getElementById("stats-content").textContent = "データの読み込みに失敗しました。";
-  });
+  loadData()
+    .then(() => applyLanguage(LANG)) // データ取得後に指標選択肢も言語反映
+    .catch((err) => {
+      console.error(err);
+      document.getElementById("stats-content").textContent = t("stats.error");
+    });
 });
