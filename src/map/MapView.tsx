@@ -95,7 +95,13 @@ export default function MapView(props: MapViewProps) {
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
-    map.on("load", () => {
+    // ソース・レイヤーの初期化。背景タイル取得に失敗しても確実に実行されるよう、
+    // "load"（初回描画完了を待つ）だけでなく "style.load"（スタイル解決時）にも
+    // バインドし、冪等に1回だけ実行する。
+    let initialized = false;
+    const setup = () => {
+      if (initialized) return;
+      initialized = true;
       const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
       map.addSource("congestion", { type: "geojson", data: empty });
       map.addLayer({
@@ -158,7 +164,11 @@ export default function MapView(props: MapViewProps) {
       });
 
       setReady(true);
-    });
+    };
+
+    map.on("load", setup);
+    map.on("style.load", setup);
+    if (map.isStyleLoaded()) setup();
 
     return () => {
       map.remove();
@@ -202,5 +212,9 @@ export default function MapView(props: MapViewProps) {
     map.setLayoutProperty("uav-heatmap", "visibility", showHeatmap ? "visible" : "none");
   }, [showHeatmap, ready]);
 
-  return <div ref={containerRef} className="absolute inset-0" />;
+  // MapLibre の maplibre-gl.css（レイヤー未所属）は Tailwind の @layer utilities より
+  // 優先されるため、.maplibregl-map の position:relative が .absolute に勝ってしまう。
+  // コンテナの位置指定はインラインスタイル（最優先）で固定し、高さの潰れを防ぐ。
+  return <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />;
+
 }
