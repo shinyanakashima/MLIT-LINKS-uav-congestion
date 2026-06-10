@@ -2,32 +2,36 @@
  * アプリ全体の設定値。
  * 背景地図はすべて国土地理院（地理院地図）のタイルを利用する。
  *   利用規約: https://maps.gsi.go.jp/development/ichiran.html
- *
- * 表示データは国土交通省 Project LINKS の無人航空機飛行計画データ（2025年度）を
- * 1km 基準メッシュへ集計した結果（data/congestion-mesh.json）。
  */
-const APP_CONFIG = {
-  // 初期表示（日本全体が収まる位置）
+export type Lang = "ja" | "en";
+export type BasemapKey = "std" | "pale" | "photo";
+
+export interface Basemap {
+  tiles: string[];
+  maxzoom: number;
+  attribution: string;
+}
+
+const GSI_ATTR =
+  '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>';
+
+export const APP_CONFIG = {
   initialView: {
-    center: [137.5, 37.0],
+    center: [137.5, 37.0] as [number, number],
     zoom: 4.6,
     minZoom: 4,
     maxZoom: 14,
   },
-
-  // 地理院地図タイル定義
   basemaps: {
     std: {
       tiles: ["https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"],
       maxzoom: 18,
-      attribution:
-        '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>',
+      attribution: GSI_ATTR,
     },
     pale: {
       tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
       maxzoom: 18,
-      attribution:
-        '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>',
+      attribution: GSI_ATTR,
     },
     photo: {
       tiles: ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"],
@@ -35,12 +39,12 @@ const APP_CONFIG = {
       attribution:
         '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院（シームレス空中写真）</a>',
     },
-  },
+  } as Record<BasemapKey, Basemap>,
 
-  // 集計済み混雑メッシュデータ
-  dataUrl: "data/congestion-mesh.json",
+  // 配信用の集計済み混雑メッシュ（public/ 配下）
+  dataPath: "data/congestion-mesh.json",
 
-  // 混雑度カラースケール（対数的しきい値 → 色）。件数の偏りが大きいため対数刻み。
+  // 混雑度カラースケール（対数的しきい値 → 色）
   congestionScale: [
     [1, "#ffffb2"],
     [5, "#fed976"],
@@ -50,20 +54,21 @@ const APP_CONFIG = {
     [100, "#e31a1c"],
     [500, "#bd0026"],
     [2000, "#800026"],
-  ],
+  ] as [number, string][],
 };
 
 // ---------------------------------------------------------------------------
 // 多言語辞書（UI 静的テキスト）
 // ---------------------------------------------------------------------------
-const I18N = {
+export const I18N: Record<Lang, Record<string, string>> = {
   ja: {
     "doc.title": "UAV飛行計画 混雑・空域マップ | MLIT-LINKS",
     "app.title": "UAV飛行計画 混雑・空域マップ",
     "app.subtitle": "MLIT-LINKS 次世代航空モビリティ",
     "app.note":
-      "表示は<strong>飛行計画（申請）ベース</strong>であり、実際の飛行・実態を示すものではありません。元データはスキャン資料からの抽出のため、完全性・正確性は保証されません。",
-    "app.source": "出典：国土交通省 Project LINKS「無人航空機飛行計画データ（2025年度）」を加工して作成",
+      "表示は飛行計画（申請）ベースであり、実際の飛行・実態を示すものではありません。元データはスキャン資料からの抽出のため、完全性・正確性は保証されません。",
+    "app.source":
+      "出典：国土交通省 Project LINKS「無人航空機飛行計画データ（2025年度）」を加工して作成",
     "label.basemap": "背景地図",
     "label.measure": "表示する指標",
     "label.mesh": "メッシュ解像度",
@@ -100,7 +105,7 @@ const I18N = {
     "app.title": "UAV Flight Plan Congestion & Airspace Map",
     "app.subtitle": "MLIT-LINKS Advanced Air Mobility",
     "app.note":
-      "Data is <strong>flight-plan (application) based</strong> and does not represent actual flights. The source is extracted from scanned documents, so completeness and accuracy are not guaranteed.",
+      "Data is flight-plan (application) based and does not represent actual flights. The source is extracted from scanned documents, so completeness and accuracy are not guaranteed.",
     "app.source":
       "Source: Processed from MLIT Project LINKS “UAV Flight Plan Data (FY2025)”.",
     "label.basemap": "Base map",
@@ -137,32 +142,29 @@ const I18N = {
 };
 
 // カテゴリ名の対訳（日本語の正規化済みラベル → 英語）
-const LABELS_EN = {
-  // 飛行空域
-  "DID": "DID (densely inhabited)",
+export const LABELS_EN: Record<string, string> = {
+  DID: "DID (densely inhabited)",
   "150m": "Above 150m",
-  "空港周辺": "Near airport",
-  "対象無し": "None",
-  // 飛行方法
+  空港周辺: "Near airport",
+  対象無し: "None",
   "30m": "Within 30m",
-  "催し物": "Over events",
-  "夜間": "Night",
-  "目視外": "BVLOS",
-  "危険物": "Hazardous materials",
-  "物件投下": "Object dropping",
-  // 飛行目的（用途）
-  "空撮": "Aerial photography",
-  "報道取材": "News coverage",
-  "警備": "Security",
-  "農林水産業": "Agriculture/forestry/fishery",
-  "測量": "Surveying",
-  "環境調査": "Environmental survey",
-  "設備メンテナンス": "Equipment maintenance",
+  催し物: "Over events",
+  夜間: "Night",
+  目視外: "BVLOS",
+  危険物: "Hazardous materials",
+  物件投下: "Object dropping",
+  空撮: "Aerial photography",
+  報道取材: "News coverage",
+  警備: "Security",
+  農林水産業: "Agriculture/forestry/fishery",
+  測量: "Surveying",
+  環境調査: "Environmental survey",
+  設備メンテナンス: "Equipment maintenance",
   "インフラ点検・保守": "Infrastructure inspection",
-  "資材管理": "Material management",
+  資材管理: "Material management",
   "輸送・宅配": "Transport/delivery",
-  "自然観測": "Nature observation",
+  自然観測: "Nature observation",
   "事故・災害対応等": "Accident/disaster response",
-  "その他": "Other",
-  "包括申請": "Comprehensive application",
+  その他: "Other",
+  包括申請: "Comprehensive application",
 };

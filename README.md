@@ -44,6 +44,18 @@
 
 ---
 
+## 用語説明
+
+| 用語 | 説明 |
+| --- | --- |
+| **飛行計画** | ドローンを飛ばす前に提出される申請。本マップの集計単位（1件＝1申請）。 |
+| **混雑メッシュ** | 地図を格子状に区切り、各マスに含まれる飛行計画の件数を色で表したもの。 |
+| **DID（人口集中地区）** | 国勢調査で定義される人口が集中した地区。飛行に許可が必要な空域区分の一つ。 |
+| **150m以上** | 地表・水面から150m以上の高さの空域。飛行に許可が必要。 |
+| **空港周辺** | 空港等の周辺空域。飛行に許可が必要。 |
+| **目視外（BVLOS）** | 操縦者が機体を直接目視せずに飛行させる方法。 |
+| **包括申請** | 期間・場所をまとめて一括で申請する方式。多数の目的が同時に申請される傾向がある。 |
+
 ## データについて
 
 | 項目 | 内容 |
@@ -77,26 +89,36 @@
 
 | 区分 | 内容 |
 | --- | --- |
-| 地図エンジン | [MapLibre GL JS](https://maplibre.org/) 4.x（CDN 読み込み・API キー不要） |
+| フロントエンド | React + TypeScript |
+| ビルド | Vite |
+| スタイリング | Tailwind CSS v4 |
+| 地図エンジン | [MapLibre GL JS](https://maplibre.org/) 4.x（npm 同梱・API キー不要・CDN 非依存） |
 | 背景地図 | [地理院タイル（国土地理院）](https://maps.gsi.go.jp/development/ichiran.html) |
 | 前処理 | Python 3（標準ライブラリのみ・追加依存なし） |
-| サイト構成 | ビルド工程不要の静的サイト（HTML / CSS / Vanilla JS） |
-| ホスティング | GitHub Pages（GitHub Actions で自動デプロイ） |
+| ホスティング | GitHub Pages（GitHub Actions でビルド・自動デプロイ） |
+
+地図ライブラリは CDN ではなく npm 依存として同梱し、ビルド成果物を配信します。
 
 ---
 
 ## ローカルで動かす
 
-`fetch` で JSON を読み込むため、ファイルを直接開くのではなく簡易サーバー経由で開きます。
-
 ```bash
 git clone https://github.com/shinyanakashima/MLIT-LINKS-uav-congestion.git
 cd MLIT-LINKS-uav-congestion
-python3 -m http.server 8000
-# ブラウザで http://localhost:8000 を開く
+npm install
+npm run dev
+# 表示された http://localhost:5173/... を開く
 ```
 
-配信用データ（`data/congestion-mesh.json`）はリポジトリに同梱されているため、
+本番相当のビルドを確認する場合:
+
+```bash
+npm run build    # dist/ を生成
+npm run preview  # ビルド結果をプレビュー
+```
+
+配信用データ（`public/data/congestion-mesh.json`）はリポジトリに同梱されているため、
 これだけで動作します。
 
 ## 配信データを再生成する
@@ -118,17 +140,22 @@ python3 scripts/aggregate_congestion.py
 
 ```
 .
-├── index.html                  # エントリポイント（UI 構造）
-├── css/style.css               # スタイル
-├── js/
-│   ├── config.js               # 地図・タイル・カラースケール・多言語辞書
-│   └── map.js                  # 地図初期化・集計・レイヤー・UI 制御
-├── data/
-│   └── congestion-mesh.json    # 配信用の集計済み混雑メッシュデータ
+├── index.html                      # Vite エントリポイント
+├── vite.config.ts                  # Vite 設定（base パス等）
+├── src/
+│   ├── main.tsx                    # ルートマウント
+│   ├── App.tsx                     # 状態管理・レイアウト
+│   ├── config.ts                   # 地図・タイル・カラースケール・多言語辞書
+│   ├── i18n.ts                     # 多言語ヘルパー
+│   ├── lib/congestion.ts           # メッシュ再集計ロジック
+│   ├── map/MapView.tsx             # MapLibre 地図コンポーネント
+│   └── components/                 # UI（コントロール・凡例・タイトル等）
+├── public/
+│   └── data/congestion-mesh.json   # 配信用の集計済み混雑メッシュデータ
 ├── scripts/
-│   ├── download_links_data.sh  # 生データ取得スクリプト
-│   └── aggregate_congestion.py # 混雑メッシュ集計スクリプト
-└── .github/workflows/deploy.yml # GitHub Pages 自動デプロイ
+│   ├── download_links_data.sh      # 生データ取得スクリプト
+│   └── aggregate_congestion.py     # 混雑メッシュ集計スクリプト
+└── .github/workflows/deploy.yml    # GitHub Pages ビルド・自動デプロイ
 ```
 
 ---
@@ -136,8 +163,9 @@ python3 scripts/aggregate_congestion.py
 ## デプロイ
 
 `main` ブランチへ push すると `.github/workflows/deploy.yml` が実行され、
-GitHub Pages へ自動公開されます。フォークして自分の環境で公開する場合は、
-リポジトリの **Settings → Pages → Source** を **GitHub Actions** に設定してください。
+Vite でビルドした `dist/` が GitHub Pages へ自動公開されます。フォークして自分の環境で
+公開する場合は、リポジトリの **Settings → Pages → Source** を **GitHub Actions** に
+設定してください。別パスで公開する場合は `vite.config.ts` の `base` を変更します。
 
 ---
 
